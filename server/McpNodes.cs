@@ -27,6 +27,8 @@ public static class McpNodes
     public const string SERVER_LOG = "plugin.mcp.tool.server_log";
     public const string MESSAGE_SCHEMA = "plugin.mcp.tool.message_schema";
     public const string PLUGIN_TABLES = "plugin.mcp.tool.plugin_tables";
+    public const string PLUGIN_QUERY = "plugin.mcp.tool.plugin_query";
+    public const string CLIENT_ERRORS = "plugin.mcp.tool.client_errors";
 
     /// <summary>The tool nodes, as <see cref="McpAdmin"/> declares them: the name after <c>plugin.mcp.</c> and what it allows.</summary>
     public static readonly (string Name, string Description)[] TOOLS =
@@ -50,5 +52,10 @@ public static class McpNodes
             "MCP (plugin authors): plugin message and core packet headers and fields"
         ),
         ("tool.plugin_tables", "MCP (plugin authors): a plugin's tables and columns"),
+        ("tool.plugin_query", "MCP (plugin authors): one SELECT over a plugin's own tables"),
+        (
+            "tool.client_errors",
+            "MCP (plugin authors): client module reports and client console errors"
+        ),
     ];
 }

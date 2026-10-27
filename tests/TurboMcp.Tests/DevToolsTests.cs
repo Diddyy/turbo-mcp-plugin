@@ -30,6 +30,8 @@ namespace TurboMcp.Tests;
 public sealed class DevToolsTests : IDisposable
 {
     private static readonly PlayerId DEV = new(1);
+    private static readonly DateTimeOffset NOW = new(2026, 10, 27, 12, 0, 0, TimeSpan.Zero);
+    private static readonly string[] SKILLS_TABLES = ["skills_levels", "skills_xp"];
 
     private readonly string _sdk = Path.Combine(
         Path.GetTempPath(),
@@ -57,8 +59,10 @@ public sealed class DevToolsTests : IDisposable
 
         Assert.Equal(
             [
+                "ClientErrorsTool",
                 "MessageSchemaTool",
                 "PluginErrorsTool",
+                "PluginQueryTool",
                 "PluginTablesTool",
                 "ReadDocTool",
                 "SearchDocsTool",
@@ -81,12 +85,16 @@ public sealed class DevToolsTests : IDisposable
             McpNodes.SERVER_LOG,
             McpNodes.MESSAGE_SCHEMA,
             McpNodes.PLUGIN_TABLES,
+            McpNodes.PLUGIN_QUERY,
+            McpNodes.CLIENT_ERRORS,
         };
 
         Assert.Equal(
             [
+                "client_errors",
                 "message_schema",
                 "plugin_errors",
+                "plugin_query",
                 "plugin_tables",
                 "read_doc",
                 "search_docs",
@@ -336,6 +344,8 @@ public sealed class DevToolsTests : IDisposable
             new ServerLogTool(new Log()),
             new MessageSchemaTool(new MessageStub(), new RevisionStub()),
             new PluginTablesTool(new Plugins(), new Columns([])),
+            new PluginQueryTool(new Plugins(), new Queries()),
+            new ClientErrorsTool(new Plugins(), new Console(), new Clock(NOW)),
         ];
 
     private void Write(string path, string text)
@@ -345,6 +355,164 @@ public sealed class DevToolsTests : IDisposable
         Directory.CreateDirectory(Path.GetDirectoryName(file)!);
         File.WriteAllText(file, text);
     }
+
+    [Theory]
+    [InlineData("SELECT * FROM skills_levels", "SELECT * FROM skills_levels LIMIT 51")]
+    [InlineData(
+        "select l.player_id, count(*) from `skills_levels` l join skills_xp as x on x.player_id = l.player_id group by l.player_id limit 500;",
+        "select l.player_id, count(*) from `skills_levels` l join skills_xp as x on x.player_id = l.player_id group by l.player_id limit 51"
+    )]
+    [InlineData(
+        "SELECT EXTRACT(YEAR FROM at), 'FROM players' FROM skills_xp WHERE player_id IN (SELECT player_id FROM skills_levels) LIMIT 5, 10",
+        "SELECT EXTRACT(YEAR FROM at), 'FROM players' FROM skills_xp WHERE player_id IN (SELECT player_id FROM skills_levels) LIMIT 5, 10"
+    )]
+    public void A_select_over_the_plugins_own_tables_runs_with_its_limit_capped(
+        string sql,
+        string runs
+    ) => Assert.Equal((runs, (string?)null), ReadOnlySelect.Check(sql, SKILLS_TABLES, 50));
+
+    [Theory]
+    [InlineData("SELECT * FROM players", "'players' is not one of this plugin's tables")]
+    [InlineData("SELECT * FROM skills_levels, players p", "'players' is not one of")]
+    [InlineData(
+        "SELECT * FROM skills_levels WHERE player_id IN (SELECT id FROM players)",
+        "'players' is not one of"
+    )]
+    [InlineData("SELECT * FROM skills_levels JOIN (players) ON 1", "without parentheses")]
+    [InlineData("SELECT * FROM turbodb.skills_levels", "names another schema")]
+    [InlineData("SELECT * FROM information_schema.tables", "'information_schema' is not allowed")]
+    [InlineData("UPDATE skills_levels SET level = 1", "Only a SELECT")]
+    [InlineData("SELECT 1; DROP TABLE skills_levels", "One statement only")]
+    [InlineData("SELECT * FROM skills_levels INTO OUTFILE 'x'", "'INTO' is not allowed")]
+    [InlineData("SELECT * FROM skills_levels FOR UPDATE", "'UPDATE' is not allowed")]
+    [InlineData("SELECT LOAD_FILE('/etc/passwd')", "'LOAD_FILE' is not allowed")]
+    [InlineData("SELECT SLEEP(100)", "'SLEEP' is not allowed")]
+    [InlineData("SELECT * FROM skills_levels /*! UNION SELECT * FROM players */", "No comments")]
+    [InlineData("SELECT @@version", "No variables")]
+    [InlineData("SELECT 'a\\' FROM players", "No backslash")]
+    public void Anything_but_a_select_over_the_plugins_own_tables_is_refused_with_why(
+        string sql,
+        string why
+    )
+    {
+        var (runs, error) = ReadOnlySelect.Check(sql, SKILLS_TABLES, 50);
+
+        Assert.Null(runs);
+        Assert.Contains(why, error);
+    }
+
+    [Fact]
+    public async Task Plugin_query_runs_a_checked_select_and_never_the_mcp_plugins_own_tables()
+    {
+        var plugins = new Plugins(
+            Snapshot("skills", "Skills", PluginStateType.Loaded, null),
+            Snapshot("mcp", "MCP", PluginStateType.Loaded, null)
+        )
+        {
+            Data = [.. SKILLS_TABLES.Select(x => new PluginDataItem(PluginDataKind.Table, x, 3))],
+        };
+        var queries = new Queries();
+        var mcp = new McpToolTester(new PluginQueryTool(plugins, queries)).As(
+            DEV,
+            McpNodes.PLUGIN_QUERY
+        );
+
+        var rows = (
+            await mcp.CallAsync(
+                "plugin_query",
+                new
+                {
+                    key = "skills",
+                    sql = "SELECT level FROM skills_levels",
+                    maxRows = 2,
+                },
+                Ct
+            )
+        ).AssertOk().Data<PluginQueryOutput>();
+        (
+            await mcp.CallAsync(
+                "plugin_query",
+                new { key = "skills", sql = "SELECT * FROM players" },
+                Ct
+            )
+        ).AssertError("'players' is not one of this plugin's tables (skills_levels, skills_xp)");
+        (
+            await mcp.CallAsync(
+                "plugin_query",
+                new { key = "mcp", sql = "SELECT * FROM mcp_tokens" },
+                Ct
+            )
+        ).AssertError("hold its tokens");
+
+        Assert.Equal(["SELECT level FROM skills_levels LIMIT 3"], queries.Ran);
+        Assert.Equal(["level"], rows.Columns);
+        Assert.True(rows.Truncated);
+    }
+
+    [Fact]
+    public async Task Client_errors_answers_a_modules_recent_reports_and_its_console_errors_for_one_player()
+    {
+        var plugins = new Plugins(
+            Snapshot("pet_skills", "Skills", PluginStateType.Loaded, null),
+            Snapshot("clienterrors", "Client Errors", PluginStateType.Loaded, null)
+        )
+        {
+            Data = [new PluginDataItem(PluginDataKind.Table, "clienterrors_occurrences", 4)],
+            Issues =
+            [
+                Issue("module.failed", "pet_skills.js", NOW.AddMinutes(-5)),
+                Issue("patch.unmatched", "purse_xml", NOW.AddHours(-3)),
+            ],
+        };
+        var console = new Console();
+        var mcp = new McpToolTester(new ClientErrorsTool(plugins, console, new Clock(NOW))).As(
+            DEV,
+            McpNodes.CLIENT_ERRORS
+        );
+
+        var found = (
+            await mcp.CallAsync("client_errors", new { key = "pet_skills", playerId = 7 }, Ct)
+        )
+            .AssertOk()
+            .Data<ClientErrorsOutput>();
+
+        var report = Assert.Single(found.ModuleReports);
+        Assert.Equal(("module.failed", "pet_skills.js"), (report.Kind, report.Subject));
+        Assert.Equal(
+            new ClientErrorQuery(
+                "clienterrors_occurrences",
+                @"%/plugins/pet\_skills/%",
+                7,
+                NOW.UtcDateTime.AddMinutes(-60),
+                20
+            ),
+            Assert.Single(console.Asked)
+        );
+        Assert.Null(found.ConsoleNote);
+    }
+
+    [Fact]
+    public async Task Client_errors_says_so_when_no_plugin_records_console_errors()
+    {
+        var console = new Console();
+        var mcp = new McpToolTester(
+            new ClientErrorsTool(
+                new Plugins(Snapshot("skills", "Skills", PluginStateType.Loaded, null)),
+                console,
+                new Clock(NOW)
+            )
+        ).As(DEV, McpNodes.CLIENT_ERRORS);
+
+        var found = (await mcp.CallAsync("client_errors", new { }, Ct))
+            .AssertOk()
+            .Data<ClientErrorsOutput>();
+
+        Assert.Contains("(clienterrors) is not loaded", found.ConsoleNote);
+        Assert.Empty(console.Asked);
+    }
+
+    private static PluginClientIssue Issue(string kind, string subject, DateTimeOffset at) =>
+        new(kind, subject, "", "it threw", 2, at.UtcDateTime);
 
     private static PluginSnapshot Snapshot(
         string key,
@@ -360,13 +528,19 @@ public sealed class DevToolsTests : IDisposable
     {
         public ImmutableArray<PluginDataItem> Data { get; init; } = [];
 
+        /// <summary>What clients reported of the first plugin's client half.</summary>
+        public ImmutableArray<PluginClientIssue> Issues { get; init; } = [];
+
         public bool UploadEnabled => false;
 
         public long MaxUploadBytes => 0;
 
         public ImmutableArray<PluginSnapshot> List() => [.. plugins];
 
-        public PluginContributions? ContributionsOf(string key) => null;
+        public PluginContributions? ContributionsOf(string key) =>
+            plugins.FirstOrDefault() is { } first && first.Key == key
+                ? new PluginContributions(key, null, first.State, null, [], [], Issues)
+                : null;
 
         public Task<PluginUninstallPlan?> PlanUninstallAsync(string key, CancellationToken ct) =>
             Task.FromResult(
@@ -492,5 +666,46 @@ public sealed class DevToolsTests : IDisposable
                 columns
             );
         }
+    }
+
+    private sealed class Queries : IPluginQueries
+    {
+        public List<string> Ran { get; } = [];
+
+        public Task<PluginQueryRows> RunAsync(string sql, int maxRows, CancellationToken ct)
+        {
+            Ran.Add(sql);
+
+            return Task.FromResult(
+                new PluginQueryRows(
+                    ["level"],
+                    [
+                        [1],
+                        [2],
+                    ],
+                    Truncated: true
+                )
+            );
+        }
+    }
+
+    private sealed class Console : IClientConsoleErrors
+    {
+        public List<ClientErrorQuery> Asked { get; } = [];
+
+        public Task<IReadOnlyList<ClientConsoleError>> RecentAsync(
+            ClientErrorQuery query,
+            CancellationToken ct
+        )
+        {
+            Asked.Add(query);
+
+            return Task.FromResult<IReadOnlyList<ClientConsoleError>>([]);
+        }
+    }
+
+    private sealed class Clock(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
     }
 }

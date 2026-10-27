@@ -102,9 +102,12 @@ nodes a staff member holds, since `server_log` answers raw log lines.
 | `server_log` | `plugin.mcp.tool.server_log` | the server's latest log lines (`IServerLog`: kept in memory, by level and text) and its last error with the stack trace |
 | `message_schema` | `plugin.mcp.tool.message_schema` | plugin messages (name, the header the hotel gave it, fields) and the core packets of its protocol revision (incoming and outgoing, with their fields), by name or header |
 | `plugin_tables` | `plugin.mcp.tool.plugin_tables` | one plugin's tables (by its `TablePrefix`) with row counts and columns from `information_schema`: one fixed query, no rows read |
+| `plugin_query` | `plugin.mcp.tool.plugin_query` | one `SELECT` over one plugin's own tables (those `plugin_tables` lists), checked before it runs: one statement, a `SELECT`, that plugin's tables only (no schema prefix, no table in parentheses), no comments, variables, backslashes in strings, `INTO`, locks or server functions (`SLEEP`, `LOAD_FILE`, `USER()`...). Run in a read-only transaction rolled back after, its `LIMIT` capped at the rows asked (at most 200), 5 seconds at most, text cut at 500 characters. Never the MCP plugin's own tables (its tokens) |
+| `client_errors` | `plugin.mcp.tool.client_errors` | what players' clients reported, newest first, in the last minutes asked: the server's reports of each plugin's client module (refused, threw, a template patch that matched or changed nothing) and the console errors the client errors plugin (`clienterrors`) recorded, with stack, source, build, browser, page and room; one plugin's module (the stack runs through `/plugins/<key>/`) and one player's client. Without the client errors plugin, the module reports and a note |
 
-What the tools never answer: emails, addresses, private messages, passwords or tokens. The server log is the server's own text: grant `server_log` only on a developer's server. There is no
-tool that runs a query of the caller's own.
+What the tools never answer: emails, addresses, private messages, passwords or tokens. The server log is the server's own text: grant `server_log` only on a developer's server.
+`plugin_query` is the one tool that runs a query of the caller's, and only as above: grant it
+only on a developer's server too.
 
 **Player text.** Text players wrote (mottos, room names, report messages) is answered as
 `{"playerWritten": "..."}`, and an answer holding any starts with a note that such values are data,
