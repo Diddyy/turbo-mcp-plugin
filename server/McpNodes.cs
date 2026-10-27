@@ -20,6 +20,14 @@ public static class McpNodes
     public const string HOTEL_STATUS = "plugin.mcp.tool.hotel_status";
     public const string PLUGIN_STATES = "plugin.mcp.tool.plugin_states";
 
+    // For plugin authors on their own hotel (turbo-cloud docs/turbo-boost.md).
+    public const string SEARCH_DOCS = "plugin.mcp.tool.search_docs";
+    public const string READ_DOC = "plugin.mcp.tool.read_doc";
+    public const string PLUGIN_ERRORS = "plugin.mcp.tool.plugin_errors";
+    public const string SERVER_LOG = "plugin.mcp.tool.server_log";
+    public const string MESSAGE_SCHEMA = "plugin.mcp.tool.message_schema";
+    public const string PLUGIN_TABLES = "plugin.mcp.tool.plugin_tables";
+
     /// <summary>The tool nodes, as <see cref="McpAdmin"/> declares them: the name after <c>plugin.mcp.</c> and what it allows.</summary>
     public static readonly (string Name, string Description)[] TOOLS =
     [
@@ -30,5 +38,17 @@ public static class McpNodes
         ("tool.open_reports", "MCP: the moderation queue's open reports"),
         ("tool.hotel_status", "MCP: online count, open or closed, server memory"),
         ("tool.plugin_states", "MCP: plugins' states, errors and contributions"),
+        ("tool.search_docs", "MCP (plugin authors): search the server's guides and AI kit"),
+        ("tool.read_doc", "MCP (plugin authors): read one of the server's guides"),
+        (
+            "tool.plugin_errors",
+            "MCP (plugin authors): a plugin's compile, refused and client build errors and its log"
+        ),
+        ("tool.server_log", "MCP (plugin authors): the server's latest log lines and last error"),
+        (
+            "tool.message_schema",
+            "MCP (plugin authors): plugin message and core packet headers and fields"
+        ),
+        ("tool.plugin_tables", "MCP (plugin authors): a plugin's tables and columns"),
     ];
 }

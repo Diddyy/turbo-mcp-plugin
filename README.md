@@ -86,7 +86,24 @@ one in the panel's permission editor. All are read-only.
 | `hotel_status` | `plugin.mcp.tool.hotel_status` | players online, open or closed, server memory, plugins loaded and failed |
 | `plugin_states` | `plugin.mcp.tool.plugin_states` | every plugin's state and error (compile errors, refused calls), and one plugin's contributions |
 
-What the tools never answer: emails, addresses, private messages, passwords or tokens. There is no
+### Dev tools (for plugin authors, on their own hotel)
+
+What a plugin author's assistant asks of their dev hotel (turbo-cloud `docs/turbo-boost.md`: a
+plugin's `npm run ai` writes this server's address in its `.mcp.json`). Read-only, each with its own
+node like the tools above. They exist only on a development server (its host environment is
+`Development`, as for plugin hot reload): on a live hotel they are not registered at all, whatever
+nodes a staff member holds, since `server_log` answers raw log lines.
+
+| Tool | Node | Answers |
+| --- | --- | --- |
+| `search_docs` | `plugin.mcp.tool.search_docs` | the server's own guides (`plugin-sdk/docs`, the version it runs) and its AI kit's skills, ranked by the words asked: file, heading, line, the lines around the best match |
+| `read_doc` | `plugin.mcp.tool.read_doc` | one guide or skill, or the section whose heading holds a text, with its headings |
+| `plugin_errors` | `plugin.mcp.tool.plugin_errors` | one plugin's state and each compile error (`CS...`), refused call (`TPP...`) and client module build error as file, line, column, code and message; what clients report of its client half; its recent warnings and errors from the log |
+| `server_log` | `plugin.mcp.tool.server_log` | the server's latest log lines (`IServerLog`: kept in memory, by level and text) and its last error with the stack trace |
+| `message_schema` | `plugin.mcp.tool.message_schema` | plugin messages (name, the header the hotel gave it, fields) and the core packets of its protocol revision (incoming and outgoing, with their fields), by name or header |
+| `plugin_tables` | `plugin.mcp.tool.plugin_tables` | one plugin's tables (by its `TablePrefix`) with row counts and columns from `information_schema`: one fixed query, no rows read |
+
+What the tools never answer: emails, addresses, private messages, passwords or tokens. The server log is the server's own text: grant `server_log` only on a developer's server. There is no
 tool that runs a query of the caller's own.
 
 **Player text.** Text players wrote (mottos, room names, report messages) is answered as

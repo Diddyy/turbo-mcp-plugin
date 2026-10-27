@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Turbo.Contracts.Plugins;
 using Turbo.Contracts.Plugins.Admin;
+using TurboMcp.Tools.Dev;
 
 namespace TurboMcp;
 
@@ -17,5 +18,8 @@ public sealed class McpPlugin : TurboPlugin
         services.AddSingleton<McpAudit>();
         services.AddSingleton<McpServer>();
         services.AddSingleton<IPluginAdmin, McpAdmin>();
+        // The dev tools' own: the server's guides, and the columns of a plugin's tables.
+        services.AddSingleton(_ => new DevDocs());
+        services.AddSingleton<ITableColumns, MySqlTableColumns>();
     }
 }
