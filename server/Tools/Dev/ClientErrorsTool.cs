@@ -195,6 +195,9 @@ public sealed class ClientErrorsTool(
 
     public override bool ReadOnly => true;
 
+    /// <summary>For a developer's own hotel: not registered on a live one.</summary>
+    public override bool DevelopmentOnly => true;
+
     public override async Task<McpToolResult> HandleAsync(
         ClientErrorsInput input,
         McpToolContext ctx,

@@ -496,6 +496,9 @@ public sealed class PluginQueryTool(IPluginAdministration plugins, IPluginQuerie
 
     public override bool ReadOnly => true;
 
+    /// <summary>For a developer's own hotel: not registered on a live one.</summary>
+    public override bool DevelopmentOnly => true;
+
     public override async Task<McpToolResult> HandleAsync(
         PluginQueryInput input,
         McpToolContext ctx,
