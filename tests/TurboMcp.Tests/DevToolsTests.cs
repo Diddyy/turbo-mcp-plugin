@@ -59,8 +59,10 @@ public sealed class DevToolsTests : IDisposable
 
         Assert.Equal(
             [
+                "ClientErrorsTool",
                 "MessageSchemaTool",
                 "PluginErrorsTool",
+                "PluginQueryTool",
                 "PluginTablesTool",
                 "ReadDocTool",
                 "SearchDocsTool",
