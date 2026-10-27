@@ -34,6 +34,9 @@ public sealed class ReadDocTool(DevDocs docs) : McpTool<ReadDocInput, DocText>
 
     public override bool ReadOnly => true;
 
+    /// <summary>For a developer's own hotel: not registered on a live one.</summary>
+    public override bool DevelopmentOnly => true;
+
     public override Task<McpToolResult> HandleAsync(
         ReadDocInput input,
         McpToolContext ctx,

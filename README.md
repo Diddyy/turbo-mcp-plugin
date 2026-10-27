@@ -90,7 +90,9 @@ one in the panel's permission editor. All are read-only.
 
 What a plugin author's assistant asks of their dev hotel (turbo-cloud `docs/turbo-boost.md`: a
 plugin's `npm run ai` writes this server's address in its `.mcp.json`). Read-only, each with its own
-node like the tools above; grant them on a developer's own server, not on a live hotel.
+node like the tools above. They exist only on a development server (its host environment is
+`Development`, as for plugin hot reload): on a live hotel they are not registered at all, whatever
+nodes a staff member holds, since `server_log` answers raw log lines.
 
 | Tool | Node | Answers |
 | --- | --- | --- |

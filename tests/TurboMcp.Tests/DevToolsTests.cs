@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
@@ -39,6 +40,33 @@ public sealed class DevToolsTests : IDisposable
     {
         if (Directory.Exists(_sdk))
             Directory.Delete(_sdk, recursive: true);
+    }
+
+    [Fact]
+    public void The_dev_tools_and_only_they_are_for_development_servers()
+    {
+        // A hotel registers a DevelopmentOnly tool only when its environment is Development
+        // (turbo-cloud docs/plugin-mcp-tools.md): server_log answers raw log lines.
+        var tools = typeof(ServerLogTool)
+            .Assembly.GetTypes()
+            .Where(t => typeof(IMcpTool).IsAssignableFrom(t) && !t.IsAbstract)
+            .ToDictionary(
+                t => t.Name,
+                t => ((IMcpTool)RuntimeHelpers.GetUninitializedObject(t)).DevelopmentOnly
+            );
+
+        Assert.Equal(
+            [
+                "MessageSchemaTool",
+                "PluginErrorsTool",
+                "PluginTablesTool",
+                "ReadDocTool",
+                "SearchDocsTool",
+                "ServerLogTool",
+            ],
+            tools.Where(x => x.Value).Select(x => x.Key).Order()
+        );
+        Assert.Contains("FindPlayerTool", tools.Where(x => !x.Value).Select(x => x.Key));
     }
 
     [Fact]

@@ -32,6 +32,9 @@ public sealed class SearchDocsTool(DevDocs docs) : McpTool<SearchDocsInput, Sear
 
     public override bool ReadOnly => true;
 
+    /// <summary>For a developer's own hotel: not registered on a live one.</summary>
+    public override bool DevelopmentOnly => true;
+
     public override Task<McpToolResult> HandleAsync(
         SearchDocsInput input,
         McpToolContext ctx,

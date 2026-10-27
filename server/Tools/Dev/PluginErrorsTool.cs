@@ -67,6 +67,9 @@ public sealed partial class PluginErrorsTool(IPluginAdministration plugins, ISer
 
     public override bool ReadOnly => true;
 
+    /// <summary>For a developer's own hotel: not registered on a live one.</summary>
+    public override bool DevelopmentOnly => true;
+
     public override Task<McpToolResult> HandleAsync(
         PluginErrorsInput input,
         McpToolContext ctx,
