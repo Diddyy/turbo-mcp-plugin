@@ -1,0 +1,47 @@
+# Checks the plugin against turbo-cloud's main on every push and pull request: its sources compile
+# as the server compiles them (the same references, C# and policy, plugin-sdk/Turbo.Plugin.props),
+# its tests pass and its formatting holds. A failure here means turbo-cloud moved what plugins
+# build on: fix the plugin.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      TurboCloudPath: ${{ github.workspace }}/turbo-cloud
+      TurboCloudConfiguration: Release
+    steps:
+      - name: Check out the plugin
+        uses: actions/checkout@v4
+        with:
+          path: plugin
+
+      - name: Check out turbo-cloud
+        uses: actions/checkout@v4
+        with:
+          repository: nitrodevco/turbo-cloud
+          path: turbo-cloud
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: plugin/global.json
+
+      # The server's bin folder: its assemblies and plugin-sdk/, what the server compiles plugins with.
+      - name: Build turbo-cloud's server
+        run: dotnet build turbo-cloud/Turbo.Main/Turbo.Main.csproj -c Release -nologo -v q
+
+      - name: Format
+        working-directory: plugin
+        run: |
+          dotnet tool restore
+          dotnet csharpier check .
+
+      - name: Test
+        run: dotnet test plugin/tests/TurboMcp.Tests -c Release -nologo
+
+      - name: Package
+        run: sh plugin/scripts/package.sh
