@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="server/TurboMcp.csproj" />
+  <Project Path="tests/TurboMcp.Tests/TurboMcp.Tests.csproj" />
+</Solution>

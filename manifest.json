@@ -1,0 +1,10 @@
+{
+    "Name": "MCP",
+    "Key": "mcp",
+    "Version": "1.0.0",
+    "Author": "Turbo",
+    "Dependencies": [],
+    "TablePrefix": "mcp_",
+    "ApiVersion": 1,
+    "Sources": ["server/**/*.cs"]
+}
