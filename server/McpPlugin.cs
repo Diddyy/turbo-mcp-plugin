@@ -18,8 +18,11 @@ public sealed class McpPlugin : TurboPlugin
         services.AddSingleton<McpAudit>();
         services.AddSingleton<McpServer>();
         services.AddSingleton<IPluginAdmin, McpAdmin>();
-        // The dev tools' own: the server's guides, and the columns of a plugin's tables.
+        // The dev tools' own: the server's guides, a plugin's tables (their columns, a SELECT over
+        // them) and the client errors plugin's console errors.
         services.AddSingleton(_ => new DevDocs());
         services.AddSingleton<ITableColumns, MySqlTableColumns>();
+        services.AddSingleton<IPluginQueries, MySqlPluginQueries>();
+        services.AddSingleton<IClientConsoleErrors, MySqlClientConsoleErrors>();
     }
 }
