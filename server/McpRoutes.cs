@@ -16,6 +16,8 @@ public sealed class McpRoute(McpServer server) : IPluginWebRoute
 
     public bool Anonymous => true;
 
+    public bool AnyOrigin => true;
+
     public bool CredentialHeaders => true;
 
     public Task<PluginWebResult> HandleAsync(PluginWebRequest request, CancellationToken ct) =>
@@ -35,6 +37,8 @@ public sealed class McpStreamRoute : IPluginWebRoute
     public bool Anonymous => true;
 
     // An assistant sends its staff token here too: the host must not answer it 401 as a stale player token.
+    public bool AnyOrigin => true;
+
     public bool CredentialHeaders => true;
 
     public Task<PluginWebResult> HandleAsync(PluginWebRequest request, CancellationToken ct) =>

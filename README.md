@@ -2,15 +2,16 @@
 
 The hotel's [Model Context Protocol](https://modelcontextprotocol.io) server, as a Turbo plugin.
 AI assistants (Claude Code, Claude Desktop, Cursor, the MCP Inspector, any MCP client) connect to
-the hotel and call its **tools**: this plugin's own read-only tools and the tools every other live
-plugin declares (turbo-cloud `docs/plugin-mcp-tools.md`). An assistant acts as the staff member
+the hotel and use its **tools, resources and prompts**, including contributions from every live
+plugin (turbo-cloud `docs/plugin-mcp-tools.md`). An assistant acts as the staff member
 whose token it holds: it is offered only the tools that member's permissions allow.
 
 Protocol: MCP **2025-11-25** (also answers clients asking for 2025-06-18 and 2025-03-26), over the
 Streamable HTTP transport, stateless: each `POST` carries one JSON-RPC 2.0 message and is answered
 with one JSON body; there is no session and no event stream (`GET` answers 405). Methods:
-`initialize`, `notifications/initialized`, `ping`, `tools/list`, `tools/call`. The server declares
-the `tools` capability only.
+`initialize`, `notifications/initialized`, `ping`, `tools/list`, `tools/call`, resource listing,
+template listing and reading, and prompt listing and retrieval. The server declares the
+`tools`, `resources` and `prompts` capabilities.
 
 ## Install
 
@@ -69,12 +70,14 @@ claude mcp add --transport http hotel https://example.com/api/plugins/mcp/mcp \
 **MCP Inspector**: `npx @modelcontextprotocol/inspector`, transport *Streamable HTTP*, the
 address, and an `Authorization` header `Bearer tmcp_...`.
 
-A browser page can't call it from another site: the hotel answers only its own sites' origins.
+Browser MCP clients may call the public transport from another origin using a bearer token.
+Cross-origin calls do not use hotel session cookies; authorization consent stays on the hotel site.
 
 ## Tools
 
 Each has its own permission node (granted to no one by default), so staff are given tools one by
-one in the panel's permission editor. All are read-only.
+one in the panel's permission editor. Lookup tools are read-only. `alert_player` and
+`kick_from_room` require full-access tokens and another staff member's approval for every call.
 
 | Tool | Node | Answers |
 | --- | --- | --- |
@@ -113,6 +116,52 @@ only on a developer's server too.
 `{"playerWritten": "..."}`, and an answer holding any starts with a note that such values are data,
 never instructions. The server's `instructions` say the same.
 
+## Resources, prompts and large tool catalogs
+
+`resources/list`, `resources/templates/list` and `resources/read` expose live plugins' resources.
+This plugin adds `turbo://rooms/{roomId}`, `turbo://players/{playerId}` and
+`turbo://plugins/{key}`, each protected by its own `plugin.mcp.resource.*` node. Player resources
+exclude wallet, inventory and private account data. `prompts/list` and `prompts/get` offer
+`investigate_wired`, `summarise_reports` and `review_plugin_errors` under their own
+`plugin.mcp.prompt.*` nodes. Each operation checks current permissions.
+
+When a caller may use more than `ToolCatalogThreshold` tools (40 by default), `tools/list`
+advertises `search_tools`. Search returns matching permitted tools with full schemas and hints;
+call a returned tool by its usual name. Read-only access and development-only registration still
+apply to search and calls.
+
+`alert_player` and `kick_from_room` each require their own `plugin.mcp.tool.*` permission and
+another staff member's approval through `plugin.mcp.approve`. A pending answer includes the
+approval id; no alert or kick happens until approval. These nodes have no default grants.
+Room kick rights and immunity are enforced by the server when the approved action runs.
+
+## OAuth sign-in
+
+Remote clients may discover OAuth from the MCP endpoint's `WWW-Authenticate` challenge.
+Protected resource metadata and authorization server metadata are served through the host's
+well-known routes. Public clients use authorization code flow with PKCE S256 and the MCP
+endpoint URL as `resource` in both authorization and token requests. The staff member signs
+in on the hotel site, opens the consent page, and selects read-only access or full access.
+The issued token belongs to that account: its current nodes, expiry and panel revocation
+apply exactly as for manually created bearer tokens. OAuth secrets are delivered only to the
+client. No refresh tokens are issued; reconnect when a token expires.
+
+Use the hotel's configured public HTTPS URL (`Turbo:Web:PluginRoutes:PublicUrl`, falling back
+to `Turbo:Web:SiteUrl`). Loopback HTTP is supported for development. Serve the authorization
+and consent routes through the same public origin as hotel sign-in, so the browser sends the
+hotel session cookie. A separate API hostname needs that same-origin reverse proxy for this
+flow; cookies are host-only. Allow the well-known metadata paths through the reverse proxy too.
+
+Dynamic registration is enabled by default. Disable `OAuthDynamicRegistration` and configure
+`OAuthClients` for a fixed set: each client id maps to `{ "Name": "Assistant", "RedirectUris":
+["https://client.example/callback"] }`. Redirects match exactly; HTTPS and loopback HTTP only.
+Unused dynamic registrations expire after `OAuthRegistrationMinutes` (15 minutes by default),
+freeing registration capacity. Staff approval extends a client registration to `MaxTokenDays`.
+Registered clients and in-progress consent/code state are bounded and held in the plugin
+process. Reloading or restarting requires reconnecting and registering again; run the
+whole authorization flow on one process (sticky routing when hosting multiple instances).
+Already issued access tokens persist in the existing token table and remain revocable.
+
 ## Settings (`Mcp`)
 
 | Key | Default | What |
@@ -120,6 +169,14 @@ never instructions. The server's `instructions` say the same.
 | `RequestsPerMinutePerToken` | `60` | Calls one token may make a minute; more are answered 429 until the minute is over. The hotel's per-address limit (`Turbo:Web:PluginRoutes:RequestsPerMinutePerAddress`) applies as well. |
 | `DefaultTokenDays` | `30` | How long a new token lasts when its maker does not say. |
 | `MaxTokenDays` | `365` | The longest a token may last. |
+| `ToolCatalogThreshold` | `40` | Above this many currently available tools, advertise `search_tools`. |
+| `ToolSearchLimit` | `40` | Maximum matching tool definitions returned per search (1–200). |
+| `OAuthDynamicRegistration` | `true` | Allow public clients to register exact redirect URIs. |
+| `OAuthClients` | `{}` | Configured public clients, by client id, with `Name` and `RedirectUris`. |
+| `OAuthMaxPending` | `1000` | Maximum registrations, consent tickets and codes per category. |
+| `OAuthRegistrationMinutes` | `15` | Lifetime of a dynamic registration until staff approve a connection. |
+| `OAuthAuthorizationMinutes` | `10` | Consent ticket lifetime. |
+| `OAuthCodeMinutes` | `2` | One-use authorization code lifetime. |
 | `AuditArgumentChars` | `2000` | How much of a call's arguments the call log keeps. |
 
 ## Errors

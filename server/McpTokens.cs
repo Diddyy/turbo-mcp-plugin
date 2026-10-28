@@ -80,6 +80,9 @@ public sealed class McpTokens(
         return (token, secret);
     }
 
+    /// <summary>Prevents a directly delivered OAuth token from being revealed in the panel.</summary>
+    public void Hide(int id) => _new.TryRemove(id, out _);
+
     /// <summary>The new token's secret, to the member who made it and only for <see cref="REVEAL"/>.</summary>
     public string? Reveal(int id, int player)
     {

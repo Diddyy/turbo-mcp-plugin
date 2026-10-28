@@ -2,7 +2,8 @@ namespace TurboMcp;
 
 /// <summary>
 /// The plugin's permission nodes, declared by <see cref="McpAdmin"/> (<c>plugin.mcp.*</c>) and
-/// granted to no one by default. Each tool has its own, so staff are given tools one by one.
+/// granted to no one by default. Each tool, resource and prompt has its own, so staff are given
+/// them one by one.
 /// </summary>
 public static class McpNodes
 {
@@ -30,8 +31,23 @@ public static class McpNodes
     public const string PLUGIN_QUERY = "plugin.mcp.tool.plugin_query";
     public const string CLIENT_ERRORS = "plugin.mcp.tool.client_errors";
 
-    /// <summary>The tool nodes, as <see cref="McpAdmin"/> declares them: the name after <c>plugin.mcp.</c> and what it allows.</summary>
-    public static readonly (string Name, string Description)[] TOOLS =
+    // Tools that change the hotel: each call waits for another staff member's approval.
+    public const string ALERT_PLAYER = "plugin.mcp.tool.alert_player";
+    public const string KICK_FROM_ROOM = "plugin.mcp.tool.kick_from_room";
+
+    /// <summary>Approve an assistant's alert_player or kick_from_room call (turbo-cloud docs/approvals.md).</summary>
+    public const string APPROVE_ACTIONS = "plugin.mcp.approve";
+
+    public const string ROOM_RESOURCE = "plugin.mcp.resource.room";
+    public const string PLAYER_RESOURCE = "plugin.mcp.resource.player";
+    public const string PLUGIN_RESOURCE = "plugin.mcp.resource.plugin";
+
+    public const string INVESTIGATE_WIRED = "plugin.mcp.prompt.investigate_wired";
+    public const string SUMMARISE_REPORTS = "plugin.mcp.prompt.summarise_reports";
+    public const string REVIEW_PLUGIN_ERRORS = "plugin.mcp.prompt.review_plugin_errors";
+
+    /// <summary>The tool, resource and prompt nodes, as <see cref="McpAdmin"/> declares them: the name after <c>plugin.mcp.</c> and what it allows.</summary>
+    public static readonly (string Name, string Description)[] NODES =
     [
         ("tool.find_player", "MCP: find players by name (id, name, motto, online)"),
         ("tool.player_details", "MCP: a player's wallet, club, room and furni counts"),
@@ -57,5 +73,20 @@ public static class McpNodes
             "tool.client_errors",
             "MCP (plugin authors): client module reports and client console errors"
         ),
+        (
+            "tool.alert_player",
+            "MCP: alert a player (each alert waits for another staff member's approval)"
+        ),
+        (
+            "tool.kick_from_room",
+            "MCP: kick a player from a room (each kick waits for another staff member's approval)"
+        ),
+        ("approve", "MCP: approve an assistant's alert or kick in the Approvals inbox"),
+        ("resource.room", "MCP: read a room's resource (owner, users, furni counts, wired errors)"),
+        ("resource.player", "MCP: read a player's profile (name, motto, online, room, club)"),
+        ("resource.plugin", "MCP: read a plugin's resource (state, error, contributions)"),
+        ("prompt.investigate_wired", "MCP: the prompt to investigate a room's wired"),
+        ("prompt.summarise_reports", "MCP: the prompt to summarise the open reports"),
+        ("prompt.review_plugin_errors", "MCP: the prompt to review a plugin's errors"),
     ];
 }
