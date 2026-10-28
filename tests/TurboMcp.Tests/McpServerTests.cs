@@ -305,7 +305,7 @@ public sealed class McpServerTests
 
         Assert.Equal(-32600, Code(await host.PostAsync(token, "[]")));
         Assert.Equal(-32600, Code(await host.PostAsync(token, new { id = 1, method = "ping" })));
-        Assert.Equal(-32601, Code(await host.PostAsync(token, Request(1, "resources/list"))));
+        Assert.Equal(-32601, Code(await host.PostAsync(token, Request(1, "unknown/method"))));
         Assert.Equal(
             -32602,
             Code(await host.PostAsync(token, Request(1, "tools/call", new { arguments = new { } })))

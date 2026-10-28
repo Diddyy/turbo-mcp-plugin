@@ -15,6 +15,7 @@ public sealed class McpPlugin : TurboPlugin
     protected override void Services(IServiceCollection services)
     {
         services.AddSingleton<McpTokens>();
+        services.AddSingleton<McpOAuth>();
         services.AddSingleton<McpAudit>();
         services.AddSingleton<McpServer>();
         services.AddSingleton<IPluginAdmin, McpAdmin>();

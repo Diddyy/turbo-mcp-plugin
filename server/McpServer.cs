@@ -1,10 +1,12 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Options;
 using Turbo.Contracts.Plugins;
 using Turbo.Contracts.Plugins.Mcp;
 using Turbo.Contracts.Plugins.Web;
@@ -20,7 +22,11 @@ namespace TurboMcp;
 /// </summary>
 public sealed class McpServer(
     IMcpTools tools,
+    IMcpResources resources,
+    IMcpPrompts prompts,
+    IOptionsMonitor<McpSettings> settings,
     McpTokens tokens,
+    McpOAuth oauth,
     McpAudit audit,
     PluginManifest manifest
 )
@@ -44,8 +50,16 @@ public sealed class McpServer(
         if (await tokens.FindAsync(authorization, ct) is not { } grant)
             return new PluginWebResult(
                 401,
-                Error: "This needs a staff MCP token: Authorization: Bearer tmcp_... (the admin panel's MCP page makes one)."
-            );
+                Error: "Sign in with OAuth or a staff MCP bearer token."
+            )
+            {
+                Headers = new Dictionary<string, string>
+                {
+                    ["WWW-Authenticate"] = oauth.ResourceMetadata is { } metadata
+                        ? $"Bearer resource_metadata=\"{metadata}\""
+                        : "Bearer",
+                },
+            };
 
         if (
             request.Headers.TryGetValue("mcp-protocol-version", out var version)
@@ -93,6 +107,9 @@ public sealed class McpServer(
         if (!body.TryGetProperty("method", out var methodElement) || id is null)
             return PluginWebResult.Accepted();
 
+        if (methodElement.ValueKind != JsonValueKind.String)
+            return PluginWebResult.Ok(Fail(id, INVALID_REQUEST, "method must be a string."));
+
         var method = methodElement.GetString() ?? string.Empty;
         var parameters =
             body.TryGetProperty("params", out var p) && p.ValueKind == JsonValueKind.Object
@@ -107,6 +124,11 @@ public sealed class McpServer(
                 "ping" => Done(id, new JsonObject()),
                 "tools/list" => Done(id, await ListAsync(caller, ct)),
                 "tools/call" => await CallAsync(id, parameters, grant, caller, ct),
+                "resources/list" => Done(id, await ResourcesAsync(caller, false, ct)),
+                "resources/templates/list" => Done(id, await ResourcesAsync(caller, true, ct)),
+                "resources/read" => await ReadAsync(id, parameters, caller, ct),
+                "prompts/list" => Done(id, await PromptsAsync(caller, ct)),
+                "prompts/get" => await PromptAsync(id, parameters, caller, ct),
                 _ => Fail(id, METHOD_NOT_FOUND, $"This server has no method {method}."),
             }
         );
@@ -128,6 +150,8 @@ public sealed class McpServer(
             ["capabilities"] = new JsonObject
             {
                 ["tools"] = new JsonObject { ["listChanged"] = false },
+                ["resources"] = new JsonObject { ["listChanged"] = false, ["subscribe"] = false },
+                ["prompts"] = new JsonObject { ["listChanged"] = false },
             },
             ["serverInfo"] = new JsonObject
             {
@@ -143,29 +167,30 @@ public sealed class McpServer(
     {
         var list = new JsonArray();
 
-        foreach (var tool in await tools.AvailableToAsync(caller, ct))
-        {
-            var entry = new JsonObject
-            {
-                ["name"] = tool.Name,
-                ["title"] = tool.Title,
-                ["description"] = tool.Description,
-                ["inputSchema"] = JsonNode.Parse(tool.InputSchema.GetRawText()),
-                ["annotations"] = new JsonObject
+        var available = await tools.AvailableToAsync(caller, ct);
+        if (
+            available.Length > Math.Max(0, settings.CurrentValue.ToolCatalogThreshold)
+            && !available.Any(x => x.Name == "search_tools")
+        )
+            list.Add(
+                new JsonObject
                 {
-                    ["title"] = tool.Title,
-                    ["readOnlyHint"] = tool.ReadOnly,
-                    ["destructiveHint"] = tool.Destructive,
-                    ["idempotentHint"] = tool.Idempotent,
-                    ["openWorldHint"] = tool.OpenWorld,
-                },
-            };
-
-            if (tool.OutputSchema is { } output)
-                entry["outputSchema"] = JsonNode.Parse(output.GetRawText());
-
-            list.Add(entry);
-        }
+                    ["name"] = "search_tools",
+                    ["description"] =
+                        "Search the tools you may call. Returns their full definitions. Call a returned tool by its name with tools/call.",
+                    ["inputSchema"] = JsonNode.Parse(
+                        """{"type":"object","properties":{"query":{"type":"string","description":"Words in the tool name or description."}},"required":["query"],"additionalProperties":false}"""
+                    ),
+                    ["annotations"] = new JsonObject
+                    {
+                        ["readOnlyHint"] = true,
+                        ["destructiveHint"] = false,
+                    },
+                }
+            );
+        else
+            foreach (var tool in available)
+                list.Add(ToolJson(tool));
 
         return new JsonObject { ["tools"] = list };
     }
@@ -190,6 +215,63 @@ public sealed class McpServer(
             );
 
         var name = nameElement.GetString()!;
+        var available = await tools.AvailableToAsync(caller, ct);
+        if (
+            name == "search_tools"
+            && available.Length > Math.Max(0, settings.CurrentValue.ToolCatalogThreshold)
+            && !available.Any(x => x.Name == "search_tools")
+        )
+        {
+            if (
+                !p.TryGetProperty("arguments", out var search)
+                || search.ValueKind != JsonValueKind.Object
+                || !search.TryGetProperty("query", out var query)
+                || query.ValueKind != JsonValueKind.String
+            )
+                return Fail(id, INVALID_PARAMS, "search_tools takes a text query.");
+            if (query.GetString()!.Length > 500)
+                return Fail(id, INVALID_PARAMS, "Search text is at most 500 characters.");
+            var words = query.GetString()!.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            var matches = available.Where(x =>
+                words.All(word =>
+                    (
+                        x.Name
+                        + " "
+                        + x.Description
+                        + " "
+                        + x.InputSchema.GetRawText()
+                        + " "
+                        + x.OutputSchema?.GetRawText()
+                    ).Contains(word, StringComparison.OrdinalIgnoreCase)
+                )
+            );
+            var take = Math.Clamp(settings.CurrentValue.ToolSearchLimit, 1, 200);
+            var catalog = new JsonObject
+            {
+                ["tools"] = new JsonArray([
+                    .. matches.Take(take).Select(x => (JsonNode)ToolJson(x)),
+                ]),
+            };
+            await audit.WriteAsync(
+                grant,
+                name,
+                search.GetRawText(),
+                "ok",
+                0,
+                CancellationToken.None
+            );
+            return Done(
+                id,
+                new JsonObject
+                {
+                    ["content"] = new JsonArray(
+                        new JsonObject { ["type"] = "text", ["text"] = catalog.ToJsonString() }
+                    ),
+                    ["structuredContent"] = catalog,
+                    ["isError"] = false,
+                }
+            );
+        }
         var arguments = p.TryGetProperty("arguments", out var a) ? a : (JsonElement?)null;
         var clock = Stopwatch.StartNew();
         var result = await tools.CallAsync(name, arguments, caller, ct);
@@ -204,6 +286,7 @@ public sealed class McpServer(
                 McpToolCallStatus.Error => "error",
                 McpToolCallStatus.InvalidArguments => "invalid",
                 McpToolCallStatus.Unavailable => "unavailable",
+                McpToolCallStatus.PendingApproval => "pending",
                 _ => "failed",
             },
             (int)clock.ElapsedMilliseconds,
@@ -229,10 +312,194 @@ public sealed class McpServer(
             ["isError"] = result.IsError,
         };
 
+        foreach (var link in result.Links)
+            ((JsonArray)answer["content"]!).Add(LinkJson(link));
+
         if (result.Structured is { } structured)
             answer["structuredContent"] = JsonNode.Parse(structured.GetRawText());
 
         return Done(id, answer);
+    }
+
+    private static JsonObject ToolJson(McpToolDefinition tool)
+    {
+        var entry = new JsonObject
+        {
+            ["name"] = tool.Name,
+            ["title"] = tool.Title,
+            ["description"] = tool.Description,
+            ["inputSchema"] = JsonNode.Parse(tool.InputSchema.GetRawText()),
+            ["annotations"] = new JsonObject
+            {
+                ["readOnlyHint"] = tool.ReadOnly,
+                ["destructiveHint"] = tool.Destructive,
+                ["idempotentHint"] = tool.Idempotent,
+                ["openWorldHint"] = tool.OpenWorld,
+            },
+        };
+        if (tool.OutputSchema is { } output)
+            entry["outputSchema"] = JsonNode.Parse(output.GetRawText());
+        return entry;
+    }
+
+    private static JsonObject LinkJson(McpResourceLink link) =>
+        new()
+        {
+            ["type"] = "resource_link",
+            ["uri"] = link.Uri,
+            ["name"] = link.Name,
+            ["title"] = link.Title,
+            ["description"] = link.Description,
+            ["mimeType"] = link.MimeType,
+        };
+
+    private async Task<JsonObject> ResourcesAsync(
+        McpCaller caller,
+        bool templates,
+        CancellationToken ct
+    )
+    {
+        var list = new JsonArray();
+        foreach (var resource in await resources.AvailableToAsync(caller, ct))
+            if (resource.IsTemplate == templates)
+                list.Add(
+                    new JsonObject
+                    {
+                        [templates ? "uriTemplate" : "uri"] = resource.Uri,
+                        ["name"] = resource.Name,
+                        ["title"] = resource.Title,
+                        ["description"] = resource.Description,
+                        ["mimeType"] = resource.MimeType,
+                    }
+                );
+        return new JsonObject { [templates ? "resourceTemplates" : "resources"] = list };
+    }
+
+    private async Task<JsonObject> ReadAsync(
+        JsonNode id,
+        JsonElement? parameters,
+        McpCaller caller,
+        CancellationToken ct
+    )
+    {
+        if (
+            parameters is not { } p
+            || !p.TryGetProperty("uri", out var uri)
+            || uri.ValueKind != JsonValueKind.String
+        )
+            return Fail(id, INVALID_PARAMS, "resources/read takes a uri.");
+        var result = await resources.ReadAsync(uri.GetString()!, caller, ct);
+        if (result.Status != McpResourceReadStatus.Ok)
+            return Fail(
+                id,
+                result.Status == McpResourceReadStatus.NotFound ? -32002 : -32603,
+                result.Message ?? "The resource could not be read."
+            );
+        var answer = new JsonObject
+        {
+            ["contents"] = new JsonArray([
+                .. result.Contents.Select(x =>
+                    (JsonNode)
+                        new JsonObject
+                        {
+                            ["uri"] = x.Uri,
+                            ["mimeType"] = x.MimeType,
+                            ["text"] = x.Text,
+                        }
+                ),
+            ]),
+        };
+        if (result.Note is { } note)
+            answer["_meta"] = new JsonObject { ["playerTextNote"] = note };
+        return Done(id, answer);
+    }
+
+    private async Task<JsonObject> PromptsAsync(McpCaller caller, CancellationToken ct) =>
+        new()
+        {
+            ["prompts"] = new JsonArray([
+                .. (await prompts.AvailableToAsync(caller, ct)).Select(x =>
+                    (JsonNode)
+                        new JsonObject
+                        {
+                            ["name"] = x.Name,
+                            ["title"] = x.Title,
+                            ["description"] = x.Description,
+                            ["arguments"] = new JsonArray([
+                                .. x.Arguments.Select(a =>
+                                    (JsonNode)
+                                        new JsonObject
+                                        {
+                                            ["name"] = a.Name,
+                                            ["description"] = a.Description,
+                                            ["required"] = a.Required,
+                                        }
+                                ),
+                            ]),
+                        }
+                ),
+            ]),
+        };
+
+    private async Task<JsonObject> PromptAsync(
+        JsonNode id,
+        JsonElement? parameters,
+        McpCaller caller,
+        CancellationToken ct
+    )
+    {
+        if (
+            parameters is not { } p
+            || !p.TryGetProperty("name", out var name)
+            || name.ValueKind != JsonValueKind.String
+        )
+            return Fail(id, INVALID_PARAMS, "prompts/get takes a name and text arguments.");
+        var args = new Dictionary<string, string>();
+        if (p.TryGetProperty("arguments", out var given))
+        {
+            if (given.ValueKind != JsonValueKind.Object)
+                return Fail(
+                    id,
+                    INVALID_PARAMS,
+                    "Prompt arguments must be an object of text values."
+                );
+            foreach (var arg in given.EnumerateObject())
+            {
+                if (arg.Value.ValueKind != JsonValueKind.String)
+                    return Fail(id, INVALID_PARAMS, "Prompt arguments must be text values.");
+                args[arg.Name] = arg.Value.GetString()!;
+            }
+        }
+        var result = await prompts.GetAsync(name.GetString()!, args, caller, ct);
+        if (result.Status != McpPromptGetStatus.Ok)
+            return Fail(
+                id,
+                result.Status == McpPromptGetStatus.Failed ? -32603 : INVALID_PARAMS,
+                result.Message ?? "The prompt could not be made."
+            );
+        return Done(
+            id,
+            new JsonObject
+            {
+                ["description"] = result.Description,
+                ["messages"] = new JsonArray([
+                    .. result.Messages.Select(x =>
+                        (JsonNode)
+                            new JsonObject
+                            {
+                                ["role"] = x.Role == McpPromptRole.User ? "user" : "assistant",
+                                ["content"] = new JsonObject
+                                {
+                                    ["type"] = "text",
+                                    ["text"] = x.Link is { } link
+                                        ? $"Read {link.Title ?? link.Name}: {link.Uri}"
+                                        : x.Text,
+                                },
+                            }
+                    ),
+                ]),
+            }
+        );
     }
 
     private static JsonObject Done(JsonNode id, JsonObject result) =>

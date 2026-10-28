@@ -23,7 +23,8 @@ jobs:
       - name: Check out turbo-cloud
         uses: actions/checkout@v4
         with:
-          repository: nitrodevco/turbo-cloud
+          repository: ${{ vars.TURBO_CLOUD_REPOSITORY || 'nitrodevco/turbo-cloud' }}
+          ref: ${{ vars.TURBO_CLOUD_REF || 'main' }}
           path: turbo-cloud
 
       - uses: actions/setup-dotnet@v4

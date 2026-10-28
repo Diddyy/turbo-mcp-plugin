@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Turbo.Contracts.Plugins;
@@ -56,9 +57,21 @@ internal sealed class TestHost : IAsyncDisposable
         services.AddSingleton<IOptionsMonitor<McpSettings>>(
             new StaticOptions<McpSettings>(settings ?? new McpSettings())
         );
-        services.AddSingleton(
-            new McpToolTester(new FindPlayerTool(Hotel), new WarnTool()).Registry(Hotel)
-        );
+        var tester = new McpToolTester(
+            new FindPlayerTool(Hotel),
+            new WarnTool(),
+            new AlertPlayerTool(Hotel),
+            new KickFromRoomTool(Hotel)
+        )
+            .WithResources(new TurboMcp.Resources.PlayerResource(Hotel))
+            .WithPrompts(
+                new TurboMcp.Prompts.SummariseReportsPrompt(),
+                new TurboMcp.Prompts.InvestigateWiredPrompt(Hotel)
+            );
+        var registry = tester.Registry(Hotel);
+        services.AddSingleton<IMcpTools>(registry);
+        services.AddSingleton<IMcpResources>(registry);
+        services.AddSingleton<IMcpPrompts>(registry);
         services.AddSingleton(
             new PluginManifest
             {
@@ -68,7 +81,15 @@ internal sealed class TestHost : IAsyncDisposable
                 Author = "Turbo",
             }
         );
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?> { ["Turbo:Web:SiteUrl"] = "https://hotel.test" }
+                )
+                .Build()
+        );
         services.AddSingleton<McpTokens>();
+        services.AddSingleton<McpOAuth>();
         services.AddSingleton<McpAudit>();
         services.AddSingleton<McpServer>();
         _services = services.BuildServiceProvider();
@@ -82,6 +103,8 @@ internal sealed class TestHost : IAsyncDisposable
         new(new DateTimeOffset(2026, 10, 27, 12, 0, 0, TimeSpan.Zero));
 
     public McpTokens Tokens => _services.GetRequiredService<McpTokens>();
+
+    public McpOAuth OAuth => _services.GetRequiredService<McpOAuth>();
 
     public McpAudit Audit => _services.GetRequiredService<McpAudit>();
 

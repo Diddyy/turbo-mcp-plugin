@@ -28,7 +28,7 @@ public sealed class McpAdmin(McpTokens tokens, McpAudit audit, IHotel hotel, ICo
             "MCP: see and revoke every staff member's tokens, and read the call log"
         );
 
-        foreach (var (name, description) in McpNodes.TOOLS)
+        foreach (var (name, description) in McpNodes.NODES)
             admin.Node(name, description);
 
         admin.Map("GET", "tokens", use, ListTokensAsync);
@@ -183,7 +183,7 @@ public sealed class McpAdmin(McpTokens tokens, McpAudit audit, IHotel hotel, ICo
 
             **Claude Code:** claude mcp add --transport http hotel {EndpointUrl()} --header "Authorization: Bearer <token>"
 
-            **Claude Desktop, Cursor and others:** an HTTP (streamable) MCP server at the address, with the header Authorization: Bearer <token>.
+            **Claude Desktop, Cursor and others:** add the address as an HTTP (streamable) MCP server and sign in with your hotel account. The consent page lets you choose read-only access. Bearer tokens remain supported. OAuth connections appear in the tokens list and can be revoked there.
             """;
 
     private async Task<bool> ManagesAsync(int player, CancellationToken ct) =>
